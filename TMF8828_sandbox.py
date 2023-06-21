@@ -6,9 +6,11 @@ from time import sleep
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from pyripherals.core import FPGA
+from boards import TOF
 
 sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\covg_fpga\\python\\')
-from pyripherals.core import FPGA
+
 
 matplotlib.use('TkAgg')
 plt.ion()
@@ -20,7 +22,15 @@ sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828')
 hex_dir = 'C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828'
 hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\\"
 
+# Initialize FPGA
+f = FPGA()
+f.init_device()
+
+# Instantiate the TMF8801 controller.
+tof = TOF(f)
+
 # bl: boot loader commands, read .hex file and process line by line.
+
 def bl_intel_hex(hex_dir, filename='tmf8x2x_application_patch.hex'):
     ''' read intel HEX file line by line
     Parameters
@@ -106,23 +116,56 @@ def bl_process_line(l):
     return data
 
 
-
-
 bl_hex_lines = bl_intel_hex(hex_dir, filename='tmf8x2x_application_patch.hex')
 print(f'RAM patch is {len(bl_hex_lines)} lines long')
 
 sys.path.insert(0, r'C:\Users\gamm5831\Documents\FPGA\covg_fpga\python')
-from boards import TOF
 
 logging.basicConfig(filename='DAC53401_test.log',
                     encoding='utf-8', level=logging.INFO)
 
-# Initialize FPGA
-f = FPGA()
-f.init_device()
 
-# Instantiate the TMF8801 controller.
-tof = TOF(f)
+# check ID
+id = tof.TMF.get_id()
+print(f'Chip id 0x{id:04x}')
+appid = tof.TMF.read_by_addr(0x00)
+print(f'In app {appid}')
+print(f'CPU ready? {tof.TMF.cpu_ready()}')
+
+tof.TMF.download_init()
+status = tof.TMF.ram_write_status()
+print(f'RAM write status: {status}')
+
+for l in bl_hex_lines:
+    d = bl_process_line(l)
+    if d is not None:
+        addr = d[0]
+        data = d[1:]
+
+        tof.TMF.i2c_write_long(tof.TMF.ADDRESS,
+            [addr],
+            (len(data)),
+            data)
+        # reads back 3 bytes from 'CMD_DATA7'
+        status = tof.TMF.ram_write_status()
+        # TODO: check that status is 00,00,FF
+        # TODO: consider skipping status check to reduce time for upload
+        # if not (status == [0,0,0xFF]):
+        #     print(f'Bootloader status unexpected value of {status}')
+
+tof.TMF.ramremap_reset()
+
+for i in range(3):
+    print(f'CPU ready? {tof.TMF.cpu_ready()}')
+
+print('ENABLING HISTOGRAM CAPTURE')
+tof.TMF.write(0x16, 'CMD_DATA7')
+sleep(0.02)
+tof.TMF.write(0x01, '8828HIST_DUMP')
+sleep(0.02)
+tof.TMF.write(0x15, 'CMD_DATA7')
+print('READY TO MEASURE')
+
 
 def save_data(name):
     """
@@ -211,27 +254,26 @@ def save_histogram(name):
             while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
                 st = tof.TMF.read_by_addr(0xe1)
                 bit_3 = st[0] & 0x08  # check bit 3
-                sleep(0.02)  # warning that sometimes ipython turns this into a very long sleep
                 cnt = cnt + 1
                 if cnt == cnt_limit:
                     print('Timeout waiting for INT4 HIST')
-            st = tof.TMF.read_by_addr(0xe1)
+            print(str(time.time() - start_time))
             tof.TMF.write(st[0], 'INT_STATUS')
             buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
             hist[i + sub*60] = np.asarray(buf)
+            print(str(time.time() - start_time))
         cnt = 0
         while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
             st = tof.TMF.read_by_addr(0xe1)
             bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
-            sleep(0.02)  # warning that sometimes ipython turns this into a very long sleep
             cnt = cnt + 1
             if cnt == cnt_limit:
                 print('Timeout waiting for INT2 MEAS')
-        st = tof.TMF.read_by_addr(0xe1)
+        print(str(time.time() - start_time))
         tof.TMF.write(st[0], 'INT_STATUS')
         buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
         measure[sub] = np.asarray(buf)
-
+        print(str(time.time() - start_time))
     with open(name + 'Hist.pkl', 'wb') as b:
         pickle.dump(hist, b)
     with open(name + 'Meas.pkl', 'wb') as b:
@@ -290,43 +332,3 @@ def plot_hist(hist_data_arr):
     plt.show()
 
 
-# check ID
-id = tof.TMF.get_id()
-print(f'Chip id 0x{id:04x}')
-appid = tof.TMF.read_by_addr(0x00)
-print(f'In app {appid}')
-print(f'CPU ready? {tof.TMF.cpu_ready()}')
-
-tof.TMF.download_init()
-status = tof.TMF.ram_write_status()
-print(f'RAM write status: {status}')
-
-for l in bl_hex_lines:
-    d = bl_process_line(l)
-    if d is not None:
-        addr = d[0]
-        data = d[1:]
-
-        tof.TMF.i2c_write_long(tof.TMF.ADDRESS,
-            [addr],
-            (len(data)),
-            data)
-        # reads back 3 bytes from 'CMD_DATA7'
-        status = tof.TMF.ram_write_status()
-        # TODO: check that status is 00,00,FF
-        # TODO: consider skipping status check to reduce time for upload
-        # if not (status == [0,0,0xFF]):
-        #     print(f'Bootloader status unexpected value of {status}')
-
-tof.TMF.ramremap_reset()
-
-for i in range(3):
-    print(f'CPU ready? {tof.TMF.cpu_ready()}')
-
-print('ENABLING HISTOGRAM CAPTURE')
-tof.TMF.write(0x16, 'CMD_DATA7')
-sleep(0.2)
-tof.TMF.write(0x01, '8828HIST_DUMP')
-sleep(0.2)
-tof.TMF.write(0x15, 'CMD_DATA7')
-print('READY TO MEASURE')

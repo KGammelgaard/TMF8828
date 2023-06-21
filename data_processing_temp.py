@@ -1,6 +1,6 @@
 import pickle
 import numpy as np
-filename = 'blank'
+filename = 'angleL'
 with open(filename + 'Meas.pkl', 'rb') as f:
     RawData = pickle.load(f)
 # with open(filename + 'header.pkl', 'rb') as f:
