@@ -1,4 +1,5 @@
 import pickle
+import h5py
 import numpy as np
 import os
 import matplotlib
@@ -72,6 +73,9 @@ for tdc in range(len(new_out)):
     hist_data_arr[tdc] = np.append(hist_data_arr[tdc], new_out[tdc])
 
 fig, ax = plt.subplots()
+with h5py.File('hp5DataTest.hdf5', 'w') as f:
+    for i in range(len(new_out)):
+        f.require_dataset('channel' + str(i), (128, ),'i', data=hist_data_arr[i])
 for i in range(len(new_out)):
     ax.plot(hist_data_arr[i])
 plt.show()
