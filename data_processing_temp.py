@@ -1,6 +1,6 @@
 import pickle
 import numpy as np
-filename = 'angleL'
+filename = 'blank1'
 with open(filename + 'Meas.pkl', 'rb') as f:
     RawData = pickle.load(f)
 # with open(filename + 'header.pkl', 'rb') as f:
@@ -49,11 +49,14 @@ for measurement in range(1,3):
         for col in range(8):
             if conf[measurement][row, col] < 0:
                 sq[measurement][row, col] = 0
-
+print('Distnce 1')
 print(sq[1])
+print('Confidence 1')
 print(conf[1])
 print(' ')
+print('Distance 2')
 print(sq[2])
+print('Confidence 2 ')
 print(conf[2])
 
 
