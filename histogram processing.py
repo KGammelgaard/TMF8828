@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
 filter_reference = True  # whether the processed csv and graph include reference file
-filename = '1MTest'
+filename = 'plank300mm'
 with open(filename + 'Hist.pkl', 'rb') as f:
     RawData = pickle.load(f)
 # remember every 4 bytes still reversed
