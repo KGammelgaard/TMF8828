@@ -6,11 +6,11 @@ from time import sleep
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-from pyripherals.core import FPGA
-from boards import TOF
+
+
 
 sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\covg_fpga\\python\\')
-
+from pyripherals.core import FPGA
 
 matplotlib.use('TkAgg')
 plt.ion()
@@ -21,15 +21,9 @@ sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828')
 
 hex_dir = 'C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828'
 hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\\"
-
-# Initialize FPGA
-f = FPGA()
-f.init_device()
-
-# Instantiate the TMF8801 controller.
-tof = TOF(f)
-
-# bl: boot loader commands, read .hex file and process line by line.
+# bl: boot-loader commands, read .hex file and process line by line.
+HISTCAP = True  # whether histograms are captures
+MEASURE = True # whether measurement data is processed and collected
 
 def bl_intel_hex(hex_dir, filename='tmf8x2x_application_patch.hex'):
     ''' read intel HEX file line by line
@@ -121,6 +115,14 @@ print(f'RAM patch is {len(bl_hex_lines)} lines long')
 
 sys.path.insert(0, r'C:\Users\gamm5831\Documents\FPGA\covg_fpga\python')
 
+from boards import TOF
+# Initialize FPGA
+f = FPGA()
+f.init_device()
+
+# Instantiate the TMF8801 controller.
+tof = TOF(f)
+
 logging.basicConfig(filename='DAC53401_test.log',
                     encoding='utf-8', level=logging.INFO)
 
@@ -157,14 +159,21 @@ tof.TMF.ramremap_reset()
 
 for i in range(3):
     print(f'CPU ready? {tof.TMF.cpu_ready()}')
-
-print('ENABLING HISTOGRAM CAPTURE')
-tof.TMF.write(0x16, 'CMD_DATA7')
-sleep(0.02)
-tof.TMF.write(0x01, '8828HIST_DUMP')
-sleep(0.02)
-tof.TMF.write(0x15, 'CMD_DATA7')
-print('READY TO MEASURE')
+if HISTCAP or MEASURE:
+    tof.TMF.write(0x16, 'CMD_DATA7')
+    sleep(0.02)
+    if HISTCAP:
+        print('ENABLING HISTOGRAM CAPTURE')
+        tof.TMF.write(0x01, '8828HIST_DUMP')
+        sleep(0.02)
+    if not MEASURE:
+        print('DISABLING MEASUREMENT CAPTURE')
+        temp = tof.TMF.read_by_addr(0x35)
+        temp[0] &= ~(0x04)  # set the mask with distance bit cleared to not measure
+        tof.TMF.write(temp[0], '8828AKG_SETTINGS')
+    sleep(0.02)
+    tof.TMF.write(0x15, 'CMD_DATA7')
+    print('READY TO MEASURE')
 
 
 def save_data(name):
@@ -245,39 +254,59 @@ def save_histogram(name):
     start_time = time.time()
     tof.TMF.write(0x10, 'CMD_DATA7')
     sleep(0.01)
-    for sub in range(4):
-        cnt = 0
-        bit_3 = 0
-        bit_1 = 0
-        cnt_limit = 100
-        for i in range(60):
-            while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
+    if not HISTCAP:
+        print('Histogram capture not enabled')
+        return 0
+    if MEASURE:
+        for sub in range(4):
+            cnt = 0
+            bit_3 = 0
+            bit_1 = 0
+            cnt_limit = 100
+            for i in range(60):
+                while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
+                    st = tof.TMF.read_by_addr(0xe1)
+                    bit_3 = st[0] & 0x08  # check bit 3
+                    cnt = cnt + 1
+                    if cnt == cnt_limit:
+                        print('Timeout waiting for INT4 HIST')
+                print(str(time.time() - start_time))
+                tof.TMF.write(st[0], 'INT_STATUS')
+                buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
+                hist[i + sub*60] = np.asarray(buf)
+                print(str(time.time() - start_time))
+            cnt = 0
+            while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
                 st = tof.TMF.read_by_addr(0xe1)
-                bit_3 = st[0] & 0x08  # check bit 3
+                bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
                 cnt = cnt + 1
                 if cnt == cnt_limit:
-                    print('Timeout waiting for INT4 HIST')
+                    print('Timeout waiting for INT2 MEAS')
             print(str(time.time() - start_time))
             tof.TMF.write(st[0], 'INT_STATUS')
-            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
-            hist[i + sub*60] = np.asarray(buf)
+            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
+            measure[sub] = np.asarray(buf)
             print(str(time.time() - start_time))
+        with open(name + 'Hist.pkl', 'wb') as b:
+            pickle.dump(hist, b)
+        with open(name + 'Meas.pkl', 'wb') as b:
+            pickle.dump(measure, b)
+    else:
         cnt = 0
-        while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
-            st = tof.TMF.read_by_addr(0xe1)
-            bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
-            cnt = cnt + 1
-            if cnt == cnt_limit:
-                print('Timeout waiting for INT2 MEAS')
-        print(str(time.time() - start_time))
-        tof.TMF.write(st[0], 'INT_STATUS')
-        buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
-        measure[sub] = np.asarray(buf)
-        print(str(time.time() - start_time))
-    with open(name + 'Hist.pkl', 'wb') as b:
-        pickle.dump(hist, b)
-    with open(name + 'Meas.pkl', 'wb') as b:
-        pickle.dump(measure, b)
+        bit_3 = 0
+
+        cnt_limit = 100
+        for i in range(240):
+            print(str(time.time() - start_time))
+            if i == 0:
+                tof.TMF.write(0x29, 'INT_STATUS')
+            else:
+                tof.TMF.write(0x9, 'INT_STATUS')
+            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
+            hist[i] = np.asarray(buf)
+            print(str(time.time() - start_time))
+        with open(name + 'Hist.pkl', 'wb') as b:
+            pickle.dump(hist, b)
     tof.TMF.write(0xff, 'CMD_DATA7')
     stop_time = time.time()
     print('TIME TO CAPTURE:' + str(stop_time - start_time) + ' sec')
