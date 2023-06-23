@@ -6,8 +6,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
-filter_reference = True  # whether the processed csv and graph include reference file
-filename = 'blank1'
+filter_reference = False  # whether the processed csv and graph include reference file
+filename = '1MeterForJon'
 with open(filename + 'Hist.pkl', 'rb') as f:
     RawData = pickle.load(f)
 # remember every 4 bytes still reversed
@@ -33,15 +33,20 @@ for channel in histRaw:
             histOrdered[channel] = np.append(histOrdered[channel], histRaw[channel][(4*word)+3-i])
 print(histOrdered)
 
-
-
+histReordered = []
+if not filter_reference:
+    histReordered.append(histOrdered[0])
+for r in [7, 5, 3, 1]:
+    for sr in [40, 41, 0, 1]:
+        for c in range(0, 40, 10):
+            histReordered.append(histOrdered[r+sr+c])
 
 tempArr = []
-for l in histOrdered:
-    tempArr.append(','.join(map(str, histOrdered[l])))
+for l in range(len(histReordered)):
+    tempArr.append(','.join(map(str, histReordered[l])))
 outString = '\n'.join(tempArr)
 hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\\"
-fileString = '1meter'
+fileString = filename
 # names the file in the following format: "fileString#",
 i = 0
 while os.path.exists(hist_dir + fileString + "%s.csv" % i):
@@ -73,7 +78,7 @@ for tdc in range(len(new_out)):
     hist_data_arr[tdc] = np.append(hist_data_arr[tdc], new_out[tdc])
 
 fig, ax = plt.subplots()
-with h5py.File('hp5DataTest.hdf5', 'w') as f:
+with h5py.File(filename + '.hdf5', 'w') as f:
     for i in range(len(new_out)):
         f.require_dataset('channel' + str(i), (128, ),'i', data=hist_data_arr[i])
 for i in range(len(new_out)):
