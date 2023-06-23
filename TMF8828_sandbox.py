@@ -329,21 +329,23 @@ def process_measurement(RawMeasure):
         'Confidence': np.zeros((8, 8), dtype=np.uint8)
     }
     second = {
-        'Distance': np.zeros((8, 8), dtype=np.uint8),
+        'Distance': np.zeros((8, 8), dtype=np.uint16),
         'Confidence': np.zeros((8, 8), dtype=np.uint8)
     }
     for scc in range(2):  # sub capture column
         for scr in range(2):  # sub capture row
             for col in range(2):
-                for row in range(4):
-                    first['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc] = dist[1 + 2 * scr + scc][col + 2 * row]
-                    first['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = dist[1 + 2 * scr + scc][col + 2 * row + 9]
-                    second['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc] = dist[1 + 2 * scr + scc][col + 2 * row + 18]
-                    second['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = dist[1 + 2 * scr + scc][col + 2 * row + 27]
-                    first['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc] = confidence[1 + 2 * scr + scc][col + 2 * row]
-                    first['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = confidence[1 + 2 * scr + scc][col + 2 * row + 9]
-                    second['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc] = confidence[1 + 2 * scr + scc][col + 2 * row + 18]
-                    second['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = confidence[1 + 2 * scr + scc][col + 2 * row + 27]
+                for row in range(0, 8, 2):
+                    column = 4 * col + 2 * scc
+                    arow = 7 - row - scr
+                    first['Distance'][arow, column] = dist[1 + 2 * scr + scc][col + row]
+                    first['Distance'][arow, column + 1] = dist[1 + 2 * scr + scc][col + row + 9]
+                    second['Distance'][arow, column] = dist[1 + 2 * scr + scc][col + row + 18]
+                    second['Distance'][arow, column + 1] = dist[1 + 2 * scr + scc][col + row + 27]
+                    first['Confidence'][arow, column] = confidence[1 + 2 * scr + scc][col + row]
+                    first['Confidence'][arow, column + 1] = confidence[1 + 2 * scr + scc][col + row + 9]
+                    second['Confidence'][arow, column] = confidence[1 + 2 * scr + scc][col + row + 18]
+                    second['Confidence'][arow, column + 1] = confidence[1 + 2 * scr + scc][col + row + 27]
     return first, second
 
 
@@ -382,7 +384,6 @@ def process_histogram(RawData, filter_reference=False):
         for word in range(32):
             for i in range(4):
                 histOrdered[channel] = np.append(histOrdered[channel], histRaw[channel][(4 * word) + 3 - i])
-    print(histOrdered)
 
     histReordered = []
     if not filter_reference:
@@ -415,7 +416,7 @@ def capture_to_HDF5(fileString, data_dir = hist_dir):
         measGroup.create_dataset('Distance1', (8,8), dtype=np.uint32, data=first['Distance'])
         measGroup.create_dataset('Confidence1', (8, 8), dtype=np.uint32, data=first['Confidence'])
         measGroup.create_dataset('Distance2', (8, 8), dtype=np.uint32, data=second['Distance'])
-        measGroup.create_dataset('Confidence2', (8, 8), dtype=np.uint32, data=second['Distance'])
+        measGroup.create_dataset('Confidence2', (8, 8), dtype=np.uint32, data=second['Confidence'])
         # all data loaded in now apply attributes
         for c in range(8):
             for r in range(8):
