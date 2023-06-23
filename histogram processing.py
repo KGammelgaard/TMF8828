@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 matplotlib.use('TkAgg')
 
 filter_reference = False  # whether the processed csv and graph include reference file
-filename = '1MeterForJon'
+filename = 'OrderedCsvLogScale'
 with open(filename + 'Hist.pkl', 'rb') as f:
     RawData = pickle.load(f)
 # remember every 4 bytes still reversed
@@ -77,10 +77,11 @@ for tdc in range(len(new_out)):
     hist_data_arr[tdc] = np.array([], dtype=np.float32)
     hist_data_arr[tdc] = np.append(hist_data_arr[tdc], new_out[tdc])
 
-fig, ax = plt.subplots()
+print(histReordered[0])
 with h5py.File(filename + '.hdf5', 'w') as f:
     for i in range(len(new_out)):
-        f.require_dataset('channel' + str(i), (128, ),'i', data=hist_data_arr[i])
+        f.require_dataset('channel' + str(i), (128, ),dtype=np.uint64, data=hist_data_arr[i])
+fig, ax = plt.subplots()
 for i in range(len(new_out)):
     ax.plot(hist_data_arr[i])
 plt.show()

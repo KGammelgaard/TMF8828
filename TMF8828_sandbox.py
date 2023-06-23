@@ -2,6 +2,7 @@ import logging
 import os, sys
 import pickle
 import time
+import h5py
 from time import sleep
 import numpy as np
 import matplotlib
@@ -242,82 +243,189 @@ def empty_data():
         sleep(0.2)
 
 
-def save_histogram(name):
+def save_histogram():
     """
-       reads and saves histograms fata
-       sends commadn to measure
+       reads and returns raw histograms fata
+       sends command to measure
        does not record header or sub-header
-
-       Parameters
-       ----------
-       name : string
-           name of pkl file
 
        Returns
        -------
-       data : none
+       data : dictionary of raw Histogram data and dictionary of raw measurement data
        """
     hist = {}
     measure = {}
     start_time = time.time()
     tof.TMF.write(0x10, 'CMD_DATA7')
     sleep(0.01)
-    if not HISTCAP:
-        print('Histogram capture not enabled')
-        return 0
-    if MEASURE:
-        for sub in range(4):
-            cnt = 0
-            bit_3 = 0
-            bit_1 = 0
-            cnt_limit = 100
-            for i in range(60):
-                while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
-                    st = tof.TMF.read_by_addr(0xe1)
-                    bit_3 = st[0] & 0x08  # check bit 3
-                    cnt = cnt + 1
-                    if cnt == cnt_limit:
-                        print('Timeout waiting for INT4 HIST')
-                print(str(time.time() - start_time))
-                tof.TMF.write(st[0], 'INT_STATUS')
-                buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
-                hist[i + sub*60] = np.asarray(buf)
-                print(str(time.time() - start_time))
-            cnt = 0
-            while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
-                st = tof.TMF.read_by_addr(0xe1)
-                bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
-                cnt = cnt + 1
-                if cnt == cnt_limit:
-                    print('Timeout waiting for INT2 MEAS')
-            print(str(time.time() - start_time))
-            tof.TMF.write(st[0], 'INT_STATUS')
-            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
-            measure[sub] = np.asarray(buf)
-            print(str(time.time() - start_time))
-        with open(name + 'Hist.pkl', 'wb') as b:
-            pickle.dump(hist, b)
-        with open(name + 'Meas.pkl', 'wb') as b:
-            pickle.dump(measure, b)
-    else:
+    for sub in range(4):
         cnt = 0
         bit_3 = 0
-
+        bit_1 = 0
         cnt_limit = 100
-        for i in range(240):
+        for i in range(60):
+            while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
+                st = tof.TMF.read_by_addr(0xe1)
+                bit_3 = st[0] & 0x08  # check bit 3
+                cnt = cnt + 1
+                if cnt == cnt_limit:
+                    print('Timeout waiting for INT4 HIST')
             print(str(time.time() - start_time))
-            if i == 0:
-                tof.TMF.write(0x29, 'INT_STATUS')
-            else:
-                tof.TMF.write(0x9, 'INT_STATUS')
+            tof.TMF.write(st[0], 'INT_STATUS')
             buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
-            hist[i] = np.asarray(buf)
+            hist[i + sub*60] = np.asarray(buf)
             print(str(time.time() - start_time))
-        with open(name + 'Hist.pkl', 'wb') as b:
-            pickle.dump(hist, b)
+        cnt = 0
+        while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
+            st = tof.TMF.read_by_addr(0xe1)
+            bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
+            cnt = cnt + 1
+            if cnt == cnt_limit:
+                print('Timeout waiting for INT2 MEAS')
+        print(str(time.time() - start_time))
+        tof.TMF.write(st[0], 'INT_STATUS')
+        buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
+        measure[sub] = np.asarray(buf)
+        print(str(time.time() - start_time))
     tof.TMF.write(0xff, 'CMD_DATA7')
     stop_time = time.time()
     print('TIME TO CAPTURE:' + str(stop_time - start_time) + ' sec')
+    return hist, measure
+
+
+def process_measurement(RawMeasure):
+    """
+
+    Parameters
+    ----------
+    RawMeasure : Dict
+        dictionary with raw measurement values for all channels reference and unused included
+
+    Returns
+    -------
+    first/second : dict
+        returns 2 dicts q for first and second distance each with and 8x8 distance and confidence array
+    conf
+    """
+
+    p = {}
+    for capture in range(4):
+        p[capture + 1] = np.array([], dtype=np.uint8)
+        for word in range(32):
+            for i in range(4):
+                p[capture + 1] = np.append(p[capture + 1], RawMeasure[capture][(4*word)+3-i])
+
+    confidence = {}
+    dist = {}
+    for capture in range(1, 5):
+        dist[capture] = np.array([], dtype=np.uint16)
+        confidence[capture] = np.array([], dtype=np.uint8)
+        for zone in range(36):
+            confidence[capture] = np.append(confidence[capture], p[capture][3*zone+19+1])
+            dist[capture] = np.append(dist[capture], p[capture][3*zone+19+2]+(p[capture][3*zone+19+3] << 8))
+
+    first = {
+        'Distance': np.zeros((8, 8), dtype=np.uint16),
+        'Confidence': np.zeros((8, 8), dtype=np.uint8)
+    }
+    second = {
+        'Distance': np.zeros((8, 8), dtype=np.uint8),
+        'Confidence': np.zeros((8, 8), dtype=np.uint8)
+    }
+    for scc in range(2):  # sub capture column
+        for scr in range(2):  # sub capture row
+            for col in range(2):
+                for row in range(4):
+                    first['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc] = dist[1 + 2 * scr + scc][col + 2 * row]
+                    first['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = dist[1 + 2 * scr + scc][col + 2 * row + 9]
+                    second['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc] = dist[1 + 2 * scr + scc][col + 2 * row + 18]
+                    second['Distance'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = dist[1 + 2 * scr + scc][col + 2 * row + 27]
+                    first['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc] = confidence[1 + 2 * scr + scc][col + 2 * row]
+                    first['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = confidence[1 + 2 * scr + scc][col + 2 * row + 9]
+                    second['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc] = confidence[1 + 2 * scr + scc][col + 2 * row + 18]
+                    second['Confidence'][7 - 2 * row - scr, 4 * col + 2 * scc + 1] = confidence[1 + 2 * scr + scc][col + 2 * row + 27]
+    return first, second
+
+
+def process_histogram(RawData, filter_reference=False):
+    """
+
+    Parameters
+    ----------
+    RawData : dict
+        raw data from histogram readout
+    filter_reference : bool
+        whether to filter out reference channel for returned dataset
+
+    Returns
+    -------
+    histReordered : list
+        list with histogram data for each channel in order of ROIs from left to right top to bottom
+        histReordered[0] is a reference if included
+    """
+    histRaw = {}  # combine LSB, mid-byte, and MSB for each channel
+    for i in range(8):
+        if filter_reference:
+            a = 1
+        else:
+            a = 0
+        for n in range(a, 9):
+            histRaw[i * 10 + n] = np.array([], dtype=np.uint32)
+            for b in range(128):
+                tempData = RawData[n + 30 * i][b] + (RawData[n + 30 * i + 10][b] << 8) + (
+                            RawData[n + 30 * i + 20][b] << 16)
+                histRaw[i * 10 + n] = np.append(histRaw[i * 10 + n], tempData)
+
+    histOrdered = {}
+    for channel in histRaw:
+        histOrdered[channel] = np.array([], dtype=np.uint32)
+        for word in range(32):
+            for i in range(4):
+                histOrdered[channel] = np.append(histOrdered[channel], histRaw[channel][(4 * word) + 3 - i])
+    print(histOrdered)
+
+    histReordered = []
+    if not filter_reference:
+        histReordered.append(histOrdered[0])
+    for r in [7, 5, 3, 1]:
+        for sr in [40, 41, 0, 1]:
+            for c in range(0, 40, 10):
+                histReordered.append(histOrdered[r + sr + c])
+    return histReordered
+
+
+def capture_to_HDF5(fileString, data_dir = hist_dir):
+    print('Describe Capture Scene: ')
+    scene_desc = input()
+    hist, meas = save_histogram()
+    first, second = process_measurement(meas)
+    orderedHist = list(process_histogram(hist))
+    # names the file in the following format: "fileString#",
+    i = 0
+    while os.path.exists(hist_dir + fileString + "%s.hdf5" % i):
+        i = i + 1
+    file_name = hist_dir + fileString + "%s.hdf5" % i
+    with h5py.File(file_name, 'w') as f:
+        histGroup = f.create_group('Histograms')
+        measGroup = f.create_group('Measurement')
+        histGroup.create_dataset('reference', (128,), dtype=np.uint32, data=orderedHist[0])
+        h = []
+        for i in range(1, len(orderedHist)):
+            h.append(histGroup.create_dataset('ch'+str(i), (128,), dtype=np.uint32, data=orderedHist[i]))
+        measGroup.create_dataset('Distance1', (8,8), dtype=np.uint32, data=first['Distance'])
+        measGroup.create_dataset('Confidence1', (8, 8), dtype=np.uint32, data=first['Confidence'])
+        measGroup.create_dataset('Distance2', (8, 8), dtype=np.uint32, data=second['Distance'])
+        measGroup.create_dataset('Confidence2', (8, 8), dtype=np.uint32, data=second['Distance'])
+        # all data loaded in now apply attributes
+        for c in range(8):
+            for r in range(8):
+                h[r + 8 * c].attrs.create('distance1', first['Distance'][r, c])
+                h[r + 8 * c].attrs.create('confidence1', first['Confidence'][r, c])
+                h[r + 8 * c].attrs.create('distance2', second['Distance'][r, c])
+                h[r + 8 * c].attrs.create('confidence2', second['Confidence'][r, c])
+        f.attrs.create('date', time.asctime())
+        f.attrs.create('SceneDescription', scene_desc)
+    return 0
 
 
 def write_hist(hist_data_arr, fileString, hist_dir=hist_dir):
@@ -353,7 +461,7 @@ def read_hist(hist_num, material, directory=hist_dir):
         except (ValueError, TypeError):
             pass
 
-    new_out = np.array_split(new_out, 80)
+    new_out = np.array_split(new_out, len(new_out)/128)
 
     hist_data_arr = {}
     for tdc in range(len(new_out)):
