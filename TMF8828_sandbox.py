@@ -1,4 +1,5 @@
 import logging
+import platform
 import os, sys
 import pickle
 import time
@@ -8,7 +9,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-
+h5py.get_config().track_order = True
 
 sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\covg_fpga\\python\\')
 from pyripherals.core import FPGA
@@ -395,7 +396,7 @@ def process_histogram(RawData, filter_reference=False):
     return histReordered
 
 
-def capture_to_HDF5(fileString, data_dir = hist_dir):
+def capture_to_HDF5(fileString, data_dir=hist_dir):
     print('Describe Capture Scene: ')
     scene_desc = input()
     hist, meas = save_histogram()
@@ -403,9 +404,9 @@ def capture_to_HDF5(fileString, data_dir = hist_dir):
     orderedHist = list(process_histogram(hist))
     # names the file in the following format: "fileString#",
     i = 0
-    while os.path.exists(hist_dir + fileString + "%s.hdf5" % i):
+    while os.path.exists(data_dir + fileString + "%s.hdf5" % i):
         i = i + 1
-    file_name = hist_dir + fileString + "%s.hdf5" % i
+    file_name = data_dir + fileString + "%s.hdf5" % i
     with h5py.File(file_name, 'w') as f:
         histGroup = f.create_group('Histograms')
         measGroup = f.create_group('Measurement')
@@ -424,9 +425,22 @@ def capture_to_HDF5(fileString, data_dir = hist_dir):
                 h[r + 8 * c].attrs.create('confidence1', first['Confidence'][r, c])
                 h[r + 8 * c].attrs.create('distance2', second['Distance'][r, c])
                 h[r + 8 * c].attrs.create('confidence2', second['Confidence'][r, c])
+        tof.TMF.write(0x16, 'CMD_DATA7')
+        sleep(0.02)
+        config = tof.TMF.read_by_addr(0x24, num_bytes=4)
+        if tof.TMF.read_by_addr(0x35)[0] & 0x80:
+            f.attrs.create('ConfidenceScaling', 'Logarithmic')
+        else:
+            f.attrs.create('ConfidenceScaling', 'Linear')
+        period = config[0] + (config[1] << 8)
+        kIterations = config[2] + (config[3] << 8)
+        f.attrs.create('PeriodMs', period)
+        f.attrs.create('KiloIterations', kIterations)
         f.attrs.create('date', time.asctime())
         f.attrs.create('SceneDescription', scene_desc)
-    return 0
+        f.attrs.create('Device', 'TMF8828')
+        f.attrs.create('Python Version', platform.python_version())
+        tof.TMF.write(0xff, 'CMD_DATA7')
 
 
 def write_hist(hist_data_arr, fileString, hist_dir=hist_dir):
