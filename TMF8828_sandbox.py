@@ -161,6 +161,8 @@ for l in bl_hex_lines:
 
 tof.TMF.ramremap_reset()
 
+tof.TMF.write(0x65, 'CMD_DATA7')
+sleep(0.02)
 for i in range(3):
     print(f'CPU ready? {tof.TMF.cpu_ready()}')
 if HISTCAP or MEASURE or LOGARITHMIC:
@@ -259,12 +261,12 @@ def save_histogram():
     start_time = time.time()
     tof.TMF.write(0x10, 'CMD_DATA7')
     sleep(0.01)
-    for sub in range(4):
+    for sub in range(1):
         cnt = 0
         bit_3 = 0
         bit_1 = 0
         cnt_limit = 100
-        for i in range(60):
+        for i in range(30):
             while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
                 st = tof.TMF.read_by_addr(0xe1)
                 bit_3 = st[0] & 0x08  # check bit 3
@@ -310,7 +312,7 @@ def process_measurement(RawMeasure):
     """
 
     p = {}
-    for capture in range(4):
+    for capture in range(1):
         p[capture + 1] = np.array([], dtype=np.uint8)
         for word in range(32):
             for i in range(4):
@@ -318,35 +320,27 @@ def process_measurement(RawMeasure):
 
     confidence = {}
     dist = {}
-    for capture in range(1, 5):
+    for capture in range(1, 2):
         dist[capture] = np.array([], dtype=np.uint16)
         confidence[capture] = np.array([], dtype=np.uint8)
-        for zone in range(36):
+        for zone in range(18):
             confidence[capture] = np.append(confidence[capture], p[capture][3*zone+19+1])
             dist[capture] = np.append(dist[capture], p[capture][3*zone+19+2]+(p[capture][3*zone+19+3] << 8))
 
     first = {
-        'Distance': np.zeros((8, 8), dtype=np.uint16),
-        'Confidence': np.zeros((8, 8), dtype=np.uint8)
+        'Distance': np.zeros((3, 3), dtype=np.uint16),
+        'Confidence': np.zeros((3, 3), dtype=np.uint8)
     }
     second = {
-        'Distance': np.zeros((8, 8), dtype=np.uint16),
-        'Confidence': np.zeros((8, 8), dtype=np.uint8)
+        'Distance': np.zeros((3, 3), dtype=np.uint16),
+        'Confidence': np.zeros((3, 3), dtype=np.uint8)
     }
-    for scc in range(2):  # sub capture column
-        for scr in range(2):  # sub capture row
-            for col in range(2):
-                for row in range(0, 8, 2):
-                    column = 4 * col + 2 * scc
-                    arow = 7 - row - scr
-                    first['Distance'][arow, column] = dist[1 + 2 * scr + scc][col + row]
-                    first['Distance'][arow, column + 1] = dist[1 + 2 * scr + scc][col + row + 9]
-                    second['Distance'][arow, column] = dist[1 + 2 * scr + scc][col + row + 18]
-                    second['Distance'][arow, column + 1] = dist[1 + 2 * scr + scc][col + row + 27]
-                    first['Confidence'][arow, column] = confidence[1 + 2 * scr + scc][col + row]
-                    first['Confidence'][arow, column + 1] = confidence[1 + 2 * scr + scc][col + row + 9]
-                    second['Confidence'][arow, column] = confidence[1 + 2 * scr + scc][col + row + 18]
-                    second['Confidence'][arow, column + 1] = confidence[1 + 2 * scr + scc][col + row + 27]
+    for r in range(3):
+        for c in range(3):
+            first['Distance'][r, c] = dist[1][3 * r + c]
+            first['Confidence'][r, c] = confidence[1][3 * r + c]
+            second['Distance'][r, c] = dist[1][3 * r + c + 9]
+            second['Confidence'][r, c] = confidence[1][3 * r + c + 9]
     return first, second
 
 
@@ -367,12 +361,12 @@ def process_histogram(RawData, filter_reference=False):
         histReordered[0] is a reference if included
     """
     histRaw = {}  # combine LSB, mid-byte, and MSB for each channel
-    for i in range(8):
+    for i in range(1):
         if filter_reference:
             a = 1
         else:
             a = 0
-        for n in range(a, 9):
+        for n in range(a, 10):
             histRaw[i * 10 + n] = np.array([], dtype=np.uint32)
             for b in range(128):
                 tempData = RawData[n + 30 * i][b] + (RawData[n + 30 * i + 10][b] << 8) + (
@@ -385,15 +379,7 @@ def process_histogram(RawData, filter_reference=False):
         for word in range(32):
             for i in range(4):
                 histOrdered[channel] = np.append(histOrdered[channel], histRaw[channel][(4 * word) + 3 - i])
-
-    histReordered = []
-    if not filter_reference:
-        histReordered.append(histOrdered[0])
-    for r in [7, 5, 3, 1]:
-        for sr in [40, 41, 0, 1]:
-            for c in range(0, 40, 10):
-                histReordered.append(histOrdered[r + sr + c])
-    return histReordered
+    return histOrdered
 
 
 def capture_to_HDF5(fileString, data_dir=hist_dir):
@@ -401,7 +387,7 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
     scene_desc = input()
     hist, meas = save_histogram()
     first, second = process_measurement(meas)
-    orderedHist = list(process_histogram(hist))
+    orderedHist = process_histogram(hist)
     # names the file in the following format: "fileString#",
     i = 0
     while os.path.exists(data_dir + fileString + "%s.hdf5" % i):
@@ -410,21 +396,21 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
     with h5py.File(file_name, 'w') as f:
         histGroup = f.create_group('Histograms')
         measGroup = f.create_group('Measurement')
-        histGroup.create_dataset('reference', (128,), dtype=np.uint32, data=orderedHist[0])
+        histGroup.create_dataset('reference', dtype=np.uint32, data=orderedHist[0])
         h = []
         for i in range(1, len(orderedHist)):
-            h.append(histGroup.create_dataset('ch'+str(i), (128,), dtype=np.uint32, data=orderedHist[i]))
-        measGroup.create_dataset('Distance1', (8,8), dtype=np.uint32, data=first['Distance'])
-        measGroup.create_dataset('Confidence1', (8, 8), dtype=np.uint32, data=first['Confidence'])
-        measGroup.create_dataset('Distance2', (8, 8), dtype=np.uint32, data=second['Distance'])
-        measGroup.create_dataset('Confidence2', (8, 8), dtype=np.uint32, data=second['Confidence'])
+            h.append(histGroup.create_dataset('ch'+str(i), dtype=np.uint32, data=orderedHist[i]))
+        measGroup.create_dataset('Distance1', (3,3), dtype=np.uint32, data=first['Distance'])
+        measGroup.create_dataset('Confidence1', (3, 3), dtype=np.uint32, data=first['Confidence'])
+        measGroup.create_dataset('Distance2', (3, 3), dtype=np.uint32, data=second['Distance'])
+        measGroup.create_dataset('Confidence2', (3, 3), dtype=np.uint32, data=second['Confidence'])
         # all data loaded in now apply attributes
-        for c in range(8):
-            for r in range(8):
-                h[r + 8 * c].attrs.create('distance1', first['Distance'][r, c])
-                h[r + 8 * c].attrs.create('confidence1', first['Confidence'][r, c])
-                h[r + 8 * c].attrs.create('distance2', second['Distance'][r, c])
-                h[r + 8 * c].attrs.create('confidence2', second['Confidence'][r, c])
+        for c in range(3):
+            for r in range(3):
+                h[r + 3 * c].attrs.create('distance1', first['Distance'][r, c])
+                h[r + 3 * c].attrs.create('confidence1', first['Confidence'][r, c])
+                h[r + 3 * c].attrs.create('distance2', second['Distance'][r, c])
+                h[r + 3 * c].attrs.create('confidence2', second['Confidence'][r, c])
         tof.TMF.write(0x16, 'CMD_DATA7')
         sleep(0.02)
         config = tof.TMF.read_by_addr(0x24, num_bytes=4)
@@ -438,7 +424,7 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
         f.attrs.create('KiloIterations', kIterations)
         f.attrs.create('date', time.asctime())
         f.attrs.create('SceneDescription', scene_desc)
-        f.attrs.create('Device', 'TMF8828')
+        f.attrs.create('Device', 'TMF8821')
         f.attrs.create('Python Version', platform.python_version())
         tof.TMF.write(0xff, 'CMD_DATA7')
 
