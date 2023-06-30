@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-h5py.get_config().track_order = True
+h5py.get_config().track_order = True  # keeps channels in the loaded order
 
 sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\covg_fpga\\python\\')
 from pyripherals.core import FPGA
@@ -30,7 +30,7 @@ LOGARITHMIC = True  # logarithmic confidence scaling
 
 
 def bl_intel_hex(hex_dir, filename='tmf8x2x_application_patch.hex'):
-    ''' read intel HEX file line by line
+    """ read intel HEX file line by line
     Parameters
     ----------
     hex_dir : string
@@ -43,7 +43,8 @@ def bl_intel_hex(hex_dir, filename='tmf8x2x_application_patch.hex'):
     line_list : list
         list of each line in the file
 
-    '''
+    """
+
     with open(os.path.join(hex_dir, filename), 'r') as f:
         line_list = [l for l in f]
 
@@ -414,7 +415,7 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
         h = []
         for i in range(1, len(orderedHist)):
             h.append(histGroup.create_dataset('ch'+str(i), (128,), dtype=np.uint32, data=orderedHist[i]))
-        measGroup.create_dataset('Distance1', (8,8), dtype=np.uint32, data=first['Distance'])
+        measGroup.create_dataset('Distance1', (8, 8), dtype=np.uint32, data=first['Distance'])
         measGroup.create_dataset('Confidence1', (8, 8), dtype=np.uint32, data=first['Confidence'])
         measGroup.create_dataset('Distance2', (8, 8), dtype=np.uint32, data=second['Distance'])
         measGroup.create_dataset('Confidence2', (8, 8), dtype=np.uint32, data=second['Confidence'])
