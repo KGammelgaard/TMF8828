@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 
 h5py.get_config().track_order = True  # keeps channels in the loaded order
 
-sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\covg_fpga\\python\\')
-from pyripherals.core import FPGA
+
+from pyripherals.core import FPGA, Endpoint
 
 matplotlib.use('TkAgg')
 plt.ion()
@@ -22,7 +22,7 @@ sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828')
 
 
 hex_dir = 'C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828'
-hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\\"
+hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\LineFit\\"
 # bl: boot-loader commands, read .hex file and process line by line.
 HISTCAP = True  # whether histograms are captures
 MEASURE = True  # whether measurement data is processed and collected
@@ -120,27 +120,24 @@ print(f'RAM patch is {len(bl_hex_lines)} lines long')
 
 sys.path.insert(0, r'C:\Users\gamm5831\Documents\FPGA\covg_fpga\python')
 
-from boards import TOF
 # Initialize FPGA
 f = FPGA()
 f.init_device()
 
 # Instantiate the TMF8801 controller.
-tof = TOF(f)
+tof = TMF8828(fpga=f, addr_pins=0x00, endpoints=Endpoint.I2CDAQ_QW)
 
 logging.basicConfig(filename='DAC53401_test.log',
                     encoding='utf-8', level=logging.INFO)
-
-
 # check ID
-id = tof.TMF.get_id()
+id = tof.get_id()
 print(f'Chip id 0x{id:04x}')
-appid = tof.TMF.read_by_addr(0x00)
+appid = tof.read_by_addr(0x00)
 print(f'In app {appid}')
-print(f'CPU ready? {tof.TMF.cpu_ready()}')
+print(f'CPU ready? {tof.cpu_ready()}')
 
-tof.TMF.download_init()
-status = tof.TMF.ram_write_status()
+tof.download_init()
+status = tof.ram_write_status()
 print(f'RAM write status: {status}')
 
 for l in bl_hex_lines:
@@ -149,42 +146,43 @@ for l in bl_hex_lines:
         addr = d[0]
         data = d[1:]
 
-        tof.TMF.i2c_write_long(tof.TMF.ADDRESS,
+        tof.i2c_write_long(tof.ADDRESS,
             [addr],
             (len(data)),
             data)
         # reads back 3 bytes from 'CMD_DATA7'
-        status = tof.TMF.ram_write_status()
+        status = tof.ram_write_status()
         # TODO: check that status is 00,00,FF
         # TODO: consider skipping status check to reduce time for upload
         # if not (status == [0,0,0xFF]):
         #     print(f'Bootloader status unexpected value of {status}')
 
-tof.TMF.ramremap_reset()
+tof.ramremap_reset()
 
 for i in range(3):
-    print(f'CPU ready? {tof.TMF.cpu_ready()}')
+    print(f'CPU ready? {tof.cpu_ready()}')
 if HISTCAP or MEASURE or LOGARITHMIC:
-    tof.TMF.write(0x16, 'CMD_DATA7')
+    tof.write(0x16, 'CMD_STAT')
     sleep(0.02)
     if HISTCAP:
         print('ENABLING HISTOGRAM CAPTURE')
-        tof.TMF.write(0x01, '8828HIST_DUMP')
+        tof.write(0x01, 'HIST_DUMP')
         sleep(0.02)
     if not MEASURE:
         print('DISABLING MEASUREMENT CAPTURE')
-        temp = tof.TMF.read_by_addr(0x35)
+        temp = tof.read_by_addr(0x35)
         temp[0] &= ~(0x04)  # set the mask with distance bit cleared to not measure
-        tof.TMF.write(temp[0], '8828AKG_SETTINGS')
+        tof.write(temp[0], 'ALG_SETTING')
         sleep(0.02)
     if LOGARITHMIC:
         print('ENABLING LOGARITHMIC CONFIDENCE SCALING')
-        temp = tof.TMF.read_by_addr(0x35)
+        temp = tof.read_by_addr(0x35)
         temp[0] |= 0x80  # set the mask with log bit set to log scale conf
-        tof.TMF.write(temp[0], '8828AKG_SETTINGS')
+        tof.write(temp[0], 'ALG_SETTING')
     sleep(0.02)
-    tof.TMF.write(0x15, 'CMD_DATA7')
+    tof.write(0x15, 'CMD_STAT')
     print('READY TO MEASURE')
+    
 
 
 def save_data(name):
@@ -204,13 +202,13 @@ def save_data(name):
     h = {}
     d = {}
     for i in range(1, 5):
-        stat = tof.TMF.read_by_addr(0xe1)
+        stat = tof.read_by_addr(0xe1)
         print('loop ' + str(i) + ' initial ' + str(stat[0]))
-        tof.TMF.write(stat[0], 'INT_STATUS')
-        stat = tof.TMF.read_by_addr(0xe1)
+        tof.write(stat[0], 'INT_STATUS')
+        stat = tof.read_by_addr(0xe1)
         print('loop ' + str(i) + ' cleared ' + str(stat[0]))
-        h['h' + str(i)] = tof.TMF.read_by_addr(0x20, num_bytes=4)
-        buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
+        h['h' + str(i)] = tof.read_by_addr(0x20, num_bytes=4)
+        buf, e = tof.i2c_read_long(tof.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
         d['d' + str(i)] = np.asarray(buf)
     with open(name + '.pkl', 'wb') as b:
         pickle.dump(d, b)
@@ -230,16 +228,16 @@ def empty_data():
     bit_1 = 0  # int bit for measurement
     bit_3 = 0  # int bit for histogram
     while cnt < cnt_limit:
-        st = tof.TMF.read_by_addr(0xE1)
+        st = tof.read_by_addr(0xE1)
         bit_3 = st[0] & 0x08
         bit_1 = st[0] & 0x02
         if bit_3:
-            tof.TMF.write(st[0], 'INT_STATUS')
-            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
+            tof.write(st[0], 'INT_STATUS')
+            buf, e = tof.i2c_read_long(tof.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
             cnt = 0
         elif bit_1:
-            tof.TMF.write(st[0], 'INT_STATUS')
-            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
+            tof.write(st[0], 'INT_STATUS')
+            buf, e = tof.i2c_read_long(tof.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
             cnt = 0
         cnt = cnt + 1
         sleep(0.2)
@@ -258,7 +256,7 @@ def save_histogram():
     hist = {}
     measure = {}
     start_time = time.time()
-    tof.TMF.write(0x10, 'CMD_DATA7')
+    tof.write(0x10, 'CMD_STAT')
     sleep(0.01)
     for sub in range(4):
         cnt = 0
@@ -267,29 +265,29 @@ def save_histogram():
         cnt_limit = 100
         for i in range(60):
             while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
-                st = tof.TMF.read_by_addr(0xe1)
+                st = tof.read_by_addr(0xe1)
                 bit_3 = st[0] & 0x08  # check bit 3
                 cnt = cnt + 1
                 if cnt == cnt_limit:
                     print('Timeout waiting for INT4 HIST')
             print(str(time.time() - start_time))
-            tof.TMF.write(st[0], 'INT_STATUS')
-            buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
+            tof.write(st[0], 'INT_STATUS')
+            buf, e = tof.i2c_read_long(tof.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
             hist[i + sub*60] = np.asarray(buf)
             print(str(time.time() - start_time))
         cnt = 0
         while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
-            st = tof.TMF.read_by_addr(0xe1)
+            st = tof.read_by_addr(0xe1)
             bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
             cnt = cnt + 1
             if cnt == cnt_limit:
                 print('Timeout waiting for INT2 MEAS')
         print(str(time.time() - start_time))
-        tof.TMF.write(st[0], 'INT_STATUS')
-        buf, e = tof.TMF.i2c_read_long(tof.TMF.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
+        tof.write(st[0], 'INT_STATUS')
+        buf, e = tof.i2c_read_long(tof.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
         measure[sub] = np.asarray(buf)
         print(str(time.time() - start_time))
-    tof.TMF.write(0xff, 'CMD_DATA7')
+    tof.write(0xff, 'CMD_STAT')
     stop_time = time.time()
     print('TIME TO CAPTURE:' + str(stop_time - start_time) + ' sec')
     return hist, measure
@@ -426,10 +424,10 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
                 h[r + 8 * c].attrs.create('confidence1', first['Confidence'][r, c])
                 h[r + 8 * c].attrs.create('distance2', second['Distance'][r, c])
                 h[r + 8 * c].attrs.create('confidence2', second['Confidence'][r, c])
-        tof.TMF.write(0x16, 'CMD_DATA7')
+        tof.write(0x16, 'CMD_STAT')
         sleep(0.02)
-        config = tof.TMF.read_by_addr(0x24, num_bytes=4)
-        if tof.TMF.read_by_addr(0x35)[0] & 0x80:
+        config = tof.read_by_addr(0x24, num_bytes=4)
+        if tof.read_by_addr(0x35)[0] & 0x80:
             f.attrs.create('ConfidenceScaling', 'Logarithmic')
         else:
             f.attrs.create('ConfidenceScaling', 'Linear')
@@ -441,7 +439,7 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
         f.attrs.create('SceneDescription', scene_desc)
         f.attrs.create('Device', 'TMF8828')
         f.attrs.create('Python Version', platform.python_version())
-        tof.TMF.write(0xff, 'CMD_DATA7')
+        tof.write(0xff, 'CMD_STAT')
 
 
 def write_hist(hist_data_arr, fileString, hist_dir=hist_dir):
