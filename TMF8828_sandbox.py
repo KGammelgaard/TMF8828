@@ -22,7 +22,7 @@ sys.path.append('C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828')
 
 
 hex_dir = 'C:\\Users\\gamm5831\\Documents\\FPGA\\TMF8828'
-hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\\"
+hist_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\DPeaks\\"
 # bl: boot-loader commands, read .hex file and process line by line.
 HISTCAP = True  # whether histograms are captures
 MEASURE = True  # whether measurement data is processed and collected
