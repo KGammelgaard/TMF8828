@@ -8,6 +8,7 @@ from time import sleep
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from pyripherals.peripherals.TMF8828 import TMF8828
 
 h5py.get_config().track_order = True  # keeps channels in the loaded order
 
