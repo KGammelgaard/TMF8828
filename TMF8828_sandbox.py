@@ -8,6 +8,7 @@ from time import sleep
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import serial
 
 h5py.get_config().track_order = True  # keeps channels in the loaded order
 
@@ -442,6 +443,68 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
         f.attrs.create('Device', 'TMF8828')
         f.attrs.create('Python Version', platform.python_version())
         tof.TMF.write(0xff, 'CMD_DATA7')
+
+
+def captureLargeSample(fileString, data_dir=hist_dir):
+    matDesc = input('Describe Capture Material: ')
+    i = 0
+    while os.path.exists(data_dir + fileString + "%s.hdf5" % i):
+        i = i + 1
+    file_name = data_dir + fileString + "%s.hdf5" % i  # find free filename
+
+    ser = serial.Serial('COM3', 9600)
+    stepSize = 53.3 / 1.8 # steps per degree
+
+    distances = [300]
+    angles = [-20, 20]
+    f = h5py.File(file_name, 'w')
+    for d in distances:
+        print(f'Place the sample {d}mm away from the optical center of the sensor')
+        input('Press ENTER to continue')
+        for a in angles:
+            pos = str(a * stepSize)
+            # ser.write(pos.encode())
+            sleep(2)
+            for capture in range(3):
+                path = str(d) + 'mm/' + str(a) + ' degrees/Capture #' + str(capture + 1)
+                cap = f.create_group(path)
+                hist, meas = save_histogram()
+                first, second = process_measurement(meas)
+                orderedHist = list(process_histogram(hist))
+                histGroup = cap.create_group('Histograms')
+                measGroup = cap.create_group('Measurement')
+                histGroup.create_dataset('reference', (128,), dtype=np.uint32, data=orderedHist[0])
+                h = []
+                for i in range(1, len(orderedHist)):
+                    h.append(histGroup.create_dataset('ch' + str(i), (128,), dtype=np.uint32, data=orderedHist[i]))
+                measGroup.create_dataset('Distance1', (8, 8), dtype=np.uint32, data=first['Distance'])
+                measGroup.create_dataset('Confidence1', (8, 8), dtype=np.uint32, data=first['Confidence'])
+                measGroup.create_dataset('Distance2', (8, 8), dtype=np.uint32, data=second['Distance'])
+                measGroup.create_dataset('Confidence2', (8, 8), dtype=np.uint32, data=second['Confidence'])
+                # all data loaded in now apply attributes
+                for c in range(8):
+                    for r in range(8):
+                        h[r + 8 * c].attrs.create('distance1', first['Distance'][r, c])
+                        h[r + 8 * c].attrs.create('confidence1', first['Confidence'][r, c])
+                        h[r + 8 * c].attrs.create('distance2', second['Distance'][r, c])
+                        h[r + 8 * c].attrs.create('confidence2', second['Confidence'][r, c])
+    tof.TMF.write(0x16, 'CMD_DATA7')
+    sleep(0.02)
+    config = tof.TMF.read_by_addr(0x24, num_bytes=4)
+    if tof.TMF.read_by_addr(0x35)[0] & 0x80:
+        f.attrs.create('ConfidenceScaling', 'Logarithmic')
+    else:
+        f.attrs.create('ConfidenceScaling', 'Linear')
+    period = config[0] + (config[1] << 8)
+    kIterations = config[2] + (config[3] << 8)
+    f.attrs.create('PeriodMs', period)
+    f.attrs.create('KiloIterations', kIterations)
+    f.attrs.create('date', time.asctime())
+    f.attrs.create('Material Description', matDesc)
+    f.attrs.create('Device', 'TMF8828')
+    f.attrs.create('Python Version', platform.python_version())
+    tof.TMF.write(0xff, 'CMD_DATA7')
+    f.close()
 
 
 def write_hist(hist_data_arr, fileString, hist_dir=hist_dir):
