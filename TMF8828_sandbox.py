@@ -190,6 +190,8 @@ if HISTCAP or MEASURE or LOGARITHMIC:
         temp = tof.read_by_addr(0x35)
         temp[0] |= 0x80  # set the mask with log bit set to log scale conf
         tof.write(temp[0], 'ALG_SETTING')
+    tof.write(0x04, 'POWER_CFG')
+    tof.write(0x0a, 'INT_ENAB')
     sleep(0.02)
     tof.write(0x15, 'CMD_STAT')
     print('READY TO MEASURE')
@@ -266,41 +268,30 @@ def save_histogram():
        """
     hist = {}
     measure = {}
+    subcapture = {}
     start_time = time.time()
+    try:
+        tof.endpoints['REPEAT_RESET']
+        tof.endpoints['REPEAT_START']
+    except KeyError as e:
+        raise KeyError(
+            'i2c_receive requires the I2C endpoints REPEAT_RESET and REPEAT_START. One or both are missing.')
+    tof.fpga.xem.ActivateTriggerIn(tof.endpoints['REPEAT_RESET'].address, tof.endpoints['REPEAT_RESET'].bit_index_low)
     tof.write(0x10, 'CMD_STAT')
-    sleep(0.01)
+    sleep(0.1)
+    buf, e = tof.i2c_repeat_receive(tof.ADDRESS, [0x23], data_length=132)
+    rawData = np.asarray(buf)
+    splitData = np.split(rawData, 244)
+
     for sub in range(4):
-        cnt = 0
-        bit_3 = 0
-        bit_1 = 0
-        cnt_limit = 100
         for i in range(60):
-            while (cnt < cnt_limit) and (bit_3 == 0):  # checks if bit_3 has changed
-                st = tof.read_by_addr(0xe1)
-                bit_3 = st[0] & 0x08  # check bit 3
-                cnt = cnt + 1
-                if cnt == cnt_limit:
-                    print('Timeout waiting for INT4 HIST')
-            print(str(time.time() - start_time))
-            tof.write(st[0], 'INT_STATUS')
-            buf, e = tof.i2c_read_long(tof.ADDRESS, [0x27], data_length=128, data_transfer='pipe')
-            hist[i + sub*60] = np.asarray(buf)
-            print(str(time.time() - start_time))
-        cnt = 0
-        while (cnt < cnt_limit) and (bit_1 == 0):  # checks if bit_1 has changed
-            st = tof.read_by_addr(0xe1)
-            bit_1 = st[0] & 0x02  # check bit 1 (int2 bit)
-            cnt = cnt + 1
-            if cnt == cnt_limit:
-                print('Timeout waiting for INT2 MEAS')
-        print(str(time.time() - start_time))
-        tof.write(st[0], 'INT_STATUS')
-        buf, e = tof.i2c_read_long(tof.ADDRESS, [0x24], data_length=128, data_transfer='pipe')
-        measure[sub] = np.asarray(buf)
-        print(str(time.time() - start_time))
+            hist[i+60*sub] = splitData[i + 61*sub]
+        measure[sub] = splitData[60 + sub*61]
+
     tof.write(0xff, 'CMD_STAT')
     stop_time = time.time()
     print('TIME TO CAPTURE:' + str(stop_time - start_time) + ' sec')
+
     return hist, measure
 
 
@@ -322,7 +313,7 @@ def process_measurement(RawMeasure):
     p = {}
     for capture in range(4):
         p[capture + 1] = np.array([], dtype=np.uint8)
-        for word in range(32):
+        for word in range(int(len(RawMeasure[0])/4)):
             for i in range(4):
                 p[capture + 1] = np.append(p[capture + 1], RawMeasure[capture][(4*word)+3-i])
 
@@ -332,8 +323,8 @@ def process_measurement(RawMeasure):
         dist[capture] = np.array([], dtype=np.uint16)
         confidence[capture] = np.array([], dtype=np.uint8)
         for zone in range(36):
-            confidence[capture] = np.append(confidence[capture], p[capture][3*zone+19+1])
-            dist[capture] = np.append(dist[capture], p[capture][3*zone+19+2]+(p[capture][3*zone+19+3] << 8))
+            confidence[capture] = np.append(confidence[capture], p[capture][3*zone+19+2])
+            dist[capture] = np.append(dist[capture], p[capture][3*zone+19+3]+(p[capture][3*zone+19+4] << 8))
 
     first = {
         'Distance': np.zeros((8, 8), dtype=np.uint16),
@@ -376,6 +367,12 @@ def process_histogram(RawData, filter_reference=False):
         list with histogram data for each channel in order of ROIs from left to right top to bottom
         histReordered[0] is a reference if included
     """
+    temp = {}
+    if len(RawData[0]) == 132:
+        for i in range(len(RawData)):
+            temp[i] = RawData[i][4:132]
+
+
     histRaw = {}  # combine LSB, mid-byte, and MSB for each channel
     for i in range(8):
         if filter_reference:
@@ -385,8 +382,8 @@ def process_histogram(RawData, filter_reference=False):
         for n in range(a, 9):
             histRaw[i * 10 + n] = np.array([], dtype=np.uint32)
             for b in range(128):
-                tempData = RawData[n + 30 * i][b] + (RawData[n + 30 * i + 10][b] << 8) + (
-                            RawData[n + 30 * i + 20][b] << 16)
+                tempData = temp[n + 30 * i][b] + (temp[n + 30 * i + 10][b] << 8) + (
+                            temp[n + 30 * i + 20][b] << 16)
                 histRaw[i * 10 + n] = np.append(histRaw[i * 10 + n], tempData)
 
     histOrdered = {}
