@@ -6,18 +6,23 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-data_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\DPeaks\Angle0.hdf5"
+data_dir = r"C:\Users\gamm5831\Documents\FPGA\TMF8828\data\ExperimentalTest\MysteryMaterial0.hdf5"
+distance = 400
+capture = 1
+angle = 0
+nameString = f'{distance}mm/{angle} degrees/Capture #{capture}/'
+print(nameString)
 
 with h5py.File(data_dir, 'r') as f:
     print(f.name)
     try:
-        arr = [(f['Histograms/reference'])]
+        arr = [(f['400mm/0 degrees/Capture #1/Histograms/reference'])]
     except:
         arr = [[]]
     for i in range(1, 65):
-        arr = np.append(arr, [(f['Histograms/ch'+str(i)])], axis=0)
-    conf1 = np.asarray(f['Measurement/Confidence1'])
-    dist1 = np.asarray(f['Measurement/Distance1'])
+        arr = np.append(arr, [(f[nameString+'Histograms/ch'+str(i)])], axis=0)
+    conf1 = np.asarray(f[nameString+'Measurement/Confidence1'])
+    dist1 = np.asarray(f[nameString+'Measurement/Distance1'])
 
     pltCorners = False
     rows = 1
@@ -34,10 +39,10 @@ with h5py.File(data_dir, 'r') as f:
        # for ch in range(1 + i, 65 + i, 8):  # columns
         # for ch in range(33, 41):
             #   ax[r,c].plot(range(128), arr[ch+1, :], 'ks')
-        ax.bar(range(128), arr[35, :], alpha=0.7)
+        ax.bar(range(128), arr[29, :], 1, alpha=0.7, edgecolor='black')
         if pltCorners:
             for n in corners:
-                ax.bar(range(128), arr[n, :], linestyle='--', alpha=0.5)
+                ax.bar(range(128), arr[n, :], 1, linestyle='--', alpha=0.5)
         # ax[r,c].set_xticks(range(0, 129, 5))
        # ax[r,c].set_xticks(range(0,129), minor=True)
         ax.set_xlim([0, 60])

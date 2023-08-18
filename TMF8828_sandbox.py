@@ -123,7 +123,7 @@ def bl_process_line(l):
 bl_hex_lines = bl_intel_hex(hex_dir, filename='tmf8x2x_application_patch.hex')
 print(f'RAM patch is {len(bl_hex_lines)} lines long')
 
-sys.path.insert(0, r'C:\Users\gamm5831\Documents\FPGA\covg_fpga\python')
+sys.path.insert(0, r'C:\Users\gamm5831\Documents\FPGA\tof_fpga\python')
 
 # Assign I2CDAQ busses
 Endpoint.I2CDAQ_level_shifted = Endpoint.get_chip_endpoints('I2CDAQ')
@@ -197,11 +197,16 @@ if HISTCAP or MEASURE or LOGARITHMIC:
     print('READY TO MEASURE')
     
 
-def save_histogram():
+def save_histogram(START=True, STOP=True):
     """
        reads and returns raw histograms fata
        sends command to measure
        does not record header or sub-header
+
+       START : bool
+            Whether the command to start a measurement is sent
+       STOP : bool
+            Whether the command to stop a measurement is sent
 
        Returns
        -------
@@ -218,8 +223,9 @@ def save_histogram():
         raise KeyError(
             'i2c_receive requires the I2C endpoints REPEAT_RESET and REPEAT_START. One or both are missing.')
     tof.fpga.xem.ActivateTriggerIn(tof.endpoints['REPEAT_RESET'].address, tof.endpoints['REPEAT_RESET'].bit_index_low)
-    tof.write(0x10, 'CMD_STAT')
-    sleep(0.1)
+    if START:
+        tof.write(0x10, 'CMD_STAT')
+        sleep(0.1)
     buf, e = tof.i2c_repeat_receive(tof.ADDRESS, [0x23], data_length=132)
     rawData = np.asarray(buf)
     splitData = np.split(rawData, 244)
@@ -228,8 +234,8 @@ def save_histogram():
         for i in range(60):
             hist[i+60*sub] = splitData[i + 61*sub]
         measure[sub] = splitData[60 + sub*61]
-
-    tof.write(0xff, 'CMD_STAT')
+    if STOP:
+        tof.write(0xff, 'CMD_STAT')
     stop_time = time.time()
     print('TIME TO CAPTURE:' + str(stop_time - start_time) + ' sec')
 
@@ -388,11 +394,14 @@ def capture_to_HDF5(fileString, data_dir=hist_dir):
         f.attrs.create('SceneDescription', scene_desc)
         f.attrs.create('Device', 'TMF8828')
         f.attrs.create('Python Version', platform.python_version())
+        tof.write(0x15, 'CMD_STAT')
+        sleep(0.02)
         tof.write(0xff, 'CMD_STAT')
 
 
 def captureLargeSample(fileString, data_dir=hist_dir):
     matDesc = input('Describe Capture Material: ')
+    lighting = input('Describe the room lighting')
     i = 0
     while os.path.exists(data_dir + fileString + "%s.hdf5" % i):
         i = i + 1
@@ -401,23 +410,25 @@ def captureLargeSample(fileString, data_dir=hist_dir):
     ser = serial.Serial('COM3', 9600)
     stepSize = 53.3 / 1.8  # steps per degree
 
-    distances = [300, 400]
-    angles = [-20, 0, 20]
+    distances = [300, 305, 310, 315, 320, 325, 400, 405, 410, 415, 420, 425, 500, 505, 510, 515, 520, 525]
+    angles = range(-45, 50, 5)
     f = h5py.File(file_name, 'w')
+    tof.write(0x10, 'CMD_STAT')
     for d in distances:
+        ser.write(str(0 * stepSize).encode())
         print(f'Place the sample {d}mm away from the optical center of the sensor')
         input('Press ENTER to continue')
         for a in angles:
             pos = str(a * stepSize)
             ser.write(pos.encode())
-            if a == angles[1]:
-                sleep(18)
+            if a == angles[0]:
+                sleep(14)
             else:
-                sleep(4)
+                sleep(3)
             for capture in range(3):
                 path = str(d) + 'mm/' + str(a) + ' degrees/Capture #' + str(capture + 1)
                 cap = f.create_group(path)
-                hist, meas = save_histogram()
+                hist, meas = save_histogram(START=False, STOP=False)
                 first, second = process_measurement(meas)
                 orderedHist = list(process_histogram(hist))
                 histGroup = cap.create_group('Histograms')
@@ -437,6 +448,8 @@ def captureLargeSample(fileString, data_dir=hist_dir):
                         h[r + 8 * c].attrs.create('confidence1', first['Confidence'][r, c])
                         h[r + 8 * c].attrs.create('distance2', second['Distance'][r, c])
                         h[r + 8 * c].attrs.create('confidence2', second['Confidence'][r, c])
+    tof.write(0xff, 'CMD_STAT')
+    sleep(0.01)
     tof.write(0x16, 'CMD_STAT')
     sleep(0.02)
     config = tof.read_by_addr(0x24, num_bytes=4)
@@ -452,5 +465,32 @@ def captureLargeSample(fileString, data_dir=hist_dir):
     f.attrs.create('Material Description', matDesc)
     f.attrs.create('Device', 'TMF8828')
     f.attrs.create('Python Version', platform.python_version())
+    f.attrs.create('Lighting', lighting)
+    tof.write(0x15, 'CMD_STAT')
+    sleep(0.02)
     tof.write(0xff, 'CMD_STAT')
     f.close()
+    ser.write(str(0 * stepSize).encode())
+    ser.close()
+    print('Data Capture Complete!') 
+
+
+def i2cDataTest():
+    """
+    Testing repeated reads of a single register to see if it errors over 5 minutes of continuous reads
+    Returns
+    -------
+
+    """
+    waitTime = 0.0001  # tenth of a ms
+    for i in range(int(300/waitTime)):
+        data = tof.read('PATCH')
+        if data != 52:
+            print('Data was incorrectly received')
+            return 0
+        print('Good Read: ' + str(i))
+        sleep(waitTime)
+    print("SUCCESS")
+    return 0
+
+
